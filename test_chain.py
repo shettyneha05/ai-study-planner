@@ -12,9 +12,9 @@ def test_study_chain():
     print("=" * 50)
     
     # Test inputs
-    goal = "Master UPSC Exam"
-    skills = "Basic geography, politics and history"
-    time = "8 hours a day"
+    goal = "Learn Python basics"
+    skills = "No programming experience"
+    time = "2 hours a day"
     
     print(f"📌 Goal: {goal}")
     print(f"📚 Skills: {skills}")

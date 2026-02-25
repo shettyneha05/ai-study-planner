@@ -5,11 +5,14 @@ This project is a beginner-friendly implementation of **LangChain** integrated w
 The goal is to build an **AI-powered Study Planner** that generates personalized weekly study plans.
 
 ### ✅ What's Implemented
-- ✅ **step 1**: LLM Setup with Gemini
-- ✅ **step 2**: Prompt Engineering with LangChain
+- ✅ **Step 1**: LLM Setup with Gemini
+- ✅ **Step 2**: Prompt Engineering with LangChain
   - Structured `PromptTemplate` with input variables
   - JSON output formatting for predictable responses
   - Study chain connecting Prompt → LLM → JSON Parser
+- ✅ **Step 3**: MongoDB Long-Term Memory Setup
+  - MongoDB Atlas connection with SSL support
+  - Database & collection utilities for `chat_history` and `study_plans`
 
 ---
 
@@ -17,6 +20,8 @@ The goal is to build an **AI-powered Study Planner** that generates personalized
 - **Python 3.x**
 - **LangChain** – LLM orchestration framework
 - **Google Gemini** – Large Language Model (gemini-2.5-flash)
+- **MongoDB Atlas** – Cloud database for long-term memory
+- **pymongo** – Python MongoDB driver
 - **python-dotenv** – Environment variable management
 - **Git & GitHub** – Version control and collaboration
 
@@ -40,7 +45,8 @@ ai-study-planner/
 ├── chains/
 │   └── study_chain.py      # Chain: Prompt → LLM → JSON Parser
 │
-├── memory/                 # (Coming soon) Conversation memory
+├── memory/
+│   └── mongodb_client.py   # MongoDB connection utility
 ├── agent/                  # (Coming soon) AI Agent logic
 ├── ui/                     # (Coming soon) User interface
 │

@@ -30,6 +30,7 @@ Use this EXACT JSON structure:
     ],
     "tips": ["tip1", "tip2"]
 }}
+IMPORTANT: Keep the plan to a maximum of 2 weeks. Only include 5 days per week (Monday to Friday).
 Respond with ONLY the JSON object. No other text before or after.
 """
 )
