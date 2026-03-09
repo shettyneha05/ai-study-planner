@@ -1,5 +1,10 @@
 langchain
 langchain-google-genai
 langchain-mongodb
+langchain-community
+langgraph
+tavily-python
 python-dotenv
 pymongo
+bcrypt
+streamlit
