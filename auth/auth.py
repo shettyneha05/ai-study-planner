@@ -29,6 +29,7 @@ Functions:
 
 import bcrypt
 from auth.user_store import create_user, find_user, username_exists
+from auth.session_store import create_session, validate_session, delete_session
 
 
 # ============================================================
@@ -135,9 +136,10 @@ def register_user(username: str, password: str) -> dict:
 
     # Step 5: Save to MongoDB
     create_user(username, password_hash)
+    token=create_session(username)
 
     # Step 6: Return success
-    return {"success": True, "message": "Account created successfully!", "user_id": username}
+    return {"success": True, "message": "Account created successfully!", "user_id": username, "token": token}
 
 
 # ============================================================
@@ -178,6 +180,8 @@ def login_user(username: str, password: str) -> dict:
 
     if not verify_password(password, user["password_hash"]):
         return {"success": False, "message": "Invalid username or password.", "user_id": None}
+    
+    token=create_session(username)
 
     # Step 5: Success!
-    return {"success": True, "message": f"Welcome back, {username}!", "user_id": username}
+    return {"success": True, "message": f"Welcome back, {username}!", "user_id": username, "token": token}

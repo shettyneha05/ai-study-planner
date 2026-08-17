@@ -1,4 +1,5 @@
 """
+This file takes care of database operations related to user accounts (to create account, to find users and to check if username is already taken). It talks directly to MongoDB's "users" collection.
 User Store — MongoDB collection for user accounts
 
 This module handles the DATABASE LAYER for authentication.

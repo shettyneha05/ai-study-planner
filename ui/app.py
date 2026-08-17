@@ -11,12 +11,16 @@ Pages:
 
 import sys
 import os
+from datetime import timedelta
 
 # Add project root to path so imports work when running from ui/ folder
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import streamlit as st
+import time
+import extra_streamlit_components as stx
 from auth.auth import register_user, login_user
+from auth.session_store import validate_session, delete_session, SESSION_EXPIRY_DAYS
 from chains.study_chain import generate_study_plan_with_memory
 from memory.plan_store import get_plans_by_user, get_study_plan, delete_study_plan
 from memory.chat_memory import clear_chat_history, get_message_count, get_last_goals
@@ -37,6 +41,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# ============================================================
+# Session Cookie Config
+# ============================================================
+SESSION_COOKIE_NAME = "asp_session_token"
 
 
 # ============================================================
@@ -181,6 +191,7 @@ def init_session_state():
     defaults = {
         "user_id": None,
         "session_id": None,
+        "session_token": None,
         "page": "auth",
         "agent": None,
         "chat_messages": [],
@@ -194,6 +205,100 @@ def init_session_state():
 
 init_session_state()
 
+
+# ============================================================
+# Cookie Helpers
+# ============================================================
+
+def get_cookie_manager() -> stx.CookieManager:
+    """
+    Create exactly one CookieManager component per Streamlit session.
+    The CookieManager object lives in session_state, while the actual
+    cookies live in the browser.
+    """
+    if "_cookie_manager" not in st.session_state:
+        st.session_state["_cookie_manager"] = stx.CookieManager(
+            key="cookie_manager"
+        )
+
+    return st.session_state["_cookie_manager"]
+
+
+def set_session_cookie(token: str):
+    cookie_manager = get_cookie_manager()
+
+    max_age = int(
+        timedelta(days=SESSION_EXPIRY_DAYS).total_seconds()
+    )
+
+    cookie_manager.set(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=max_age,
+        path="/",
+    )
+
+
+def clear_session_cookie():
+    cookie_manager = get_cookie_manager()
+
+    # NOTE: CookieManager.delete() only accepts (cookie, key) — it does NOT
+    # accept a `path` kwarg (that's only on .set()). Passing path=... here
+    # was the cause of the TypeError on logout.
+    try:
+        cookie_manager.delete(SESSION_COOKIE_NAME)
+    except KeyError:
+        # The library does `del self.cookies[cookie]` internally with no
+        # guard — this fires if the cookie was never in its local cache
+        # (e.g. cleared already, or never successfully set). Safe to ignore.
+        pass
+
+
+def start_user_session(user_id: str, token: str):
+    """Single source of truth for login session state + cookie."""
+
+    st.session_state.user_id = user_id
+    st.session_state.session_id = user_id
+    st.session_state.session_token = token
+    st.session_state.page = "dashboard"
+
+    set_session_cookie(token)
+
+    # CookieManager.set() writes the cookie asynchronously via a custom
+    # component (it posts to an iframe that then sets document.cookie).
+    # Without a brief pause here, the immediate st.rerun() that follows
+    # this call can fire before the browser has actually received the
+    # Set-Cookie, so the cookie never persists across a real page reload.
+    time.sleep(1)
+
+
+def restore_session_from_cookie() -> bool:
+    """
+    Restore login session from browser cookie.
+    Returns True if restored, False otherwise.
+    """
+
+    #cookie_manager = get_cookie_manager()
+
+    #token = cookie_manager.get(SESSION_COOKIE_NAME)
+    token = st.context.cookies.get(SESSION_COOKIE_NAME)
+
+    if not token:
+        return False
+
+    user_id = validate_session(token)
+
+    if not user_id:
+        clear_session_cookie()
+        return False
+
+    # Don't call set_session_cookie() here unnecessarily.
+    st.session_state.user_id = user_id
+    st.session_state.session_id = user_id
+    st.session_state.session_token = token
+    st.session_state.page = "dashboard"
+
+    return True
 
 # ============================================================
 # Auth Page — Login / Register
@@ -222,10 +327,12 @@ def render_auth_page():
                     else:
                         result = login_user(username, password)
                         if result["success"]:
-                            st.session_state.user_id = result["user_id"]
-                            st.session_state.session_id = result["user_id"]
-                            st.session_state.page = "dashboard"
-                            st.rerun()
+                            token=result.get("token")
+                            if not token:
+                                st.error("login succeeded but no session token was returned.")
+                            else:
+                                start_user_session(result["user_id"], token)
+                                st.rerun()
                         else:
                             st.error(result["message"])
 
@@ -244,10 +351,12 @@ def render_auth_page():
                     else:
                         result = register_user(new_username, new_password)
                         if result["success"]:
-                            st.session_state.user_id = result["user_id"]
-                            st.session_state.session_id = result["user_id"]
-                            st.session_state.page = "dashboard"
-                            st.rerun()
+                            token=result.get("token")
+                            if not token:
+                                st.error("Registration succeeded but no session token was returned.")
+                            else:
+                                start_user_session(result["user_id"], token)
+                                st.rerun()
                         else:
                             st.error(result["message"])
 
@@ -290,6 +399,11 @@ def render_sidebar():
         st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
         if st.button("🚪  Logout", use_container_width=True):
+            cookie_manager = get_cookie_manager()
+            token = st.session_state.session_token or cookie_manager.get(SESSION_COOKIE_NAME)
+            if token:
+                delete_session(token)
+            clear_session_cookie()
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
@@ -602,19 +716,42 @@ def render_agent_chat():
             else:
                 st.markdown(f'<div class="chat-ai">🤖 {msg["content"]}</div>', unsafe_allow_html=True)
 
+        # If the last message is from the user, the agent hasn't replied yet.
+        # Show a "thinking" bubble right in the chat log so the conversation
+        # doesn't look stuck while the response is being generated below.
+        if (
+            st.session_state.chat_messages
+            and st.session_state.chat_messages[-1]["role"] == "user"
+        ):
+            st.markdown(
+                '<div class="chat-ai">🤖 🤔 Thinking...</div>',
+                unsafe_allow_html=True,
+            )
+
     # Input
     user_input = st.chat_input("Type your message...")
 
     if user_input:
-        # Add user message
+        # Append the user message and rerun immediately so it renders right
+        # away, instead of only appearing once the agent's reply comes back.
         st.session_state.chat_messages.append({"role": "user", "content": user_input})
+        st.rerun()
 
-        # Get agent response
+    # If there's a pending user message with no reply yet, generate the
+    # response now. This runs on the rerun triggered above — by that point
+    # the user's message (and the "Thinking..." bubble) has already been
+    # rendered in the block above.
+    if (
+        st.session_state.chat_messages
+        and st.session_state.chat_messages[-1]["role"] == "user"
+    ):
+        last_user_message = st.session_state.chat_messages[-1]["content"]
+
         with st.spinner("🤔 Thinking..."):
             try:
                 response = chat_with_agent(
                     st.session_state.agent,
-                    user_input,
+                    last_user_message,
                     st.session_state.session_id,
                 )
             except Exception as e:
@@ -624,26 +761,44 @@ def render_agent_chat():
         st.rerun()
 
 
+
+
 # ============================================================
 # Main Router
 # ============================================================
 def main():
-    if st.session_state.user_id is None:
-        render_auth_page()
-    else:
+
+    # ---------------------------------------------------------
+    # Existing Streamlit session
+    # ---------------------------------------------------------
+    if st.session_state.user_id is not None:
+
         render_sidebar()
 
-        page = st.session_state.page
-        if page == "dashboard":
+        if st.session_state.page == "dashboard":
             render_dashboard()
-        elif page == "generate":
+
+        elif st.session_state.page == "generate":
             render_generate_plan()
-        elif page == "plan_detail":
+
+        elif st.session_state.page == "plan_detail":
             render_plan_detail()
-        elif page == "agent_chat":
+
+        elif st.session_state.page == "agent_chat":
             render_agent_chat()
-        else:
-            render_dashboard()
+
+        return
+
+    # ---------------------------------------------------------
+    # New Streamlit session → restore from browser cookie
+    # ---------------------------------------------------------
+    if restore_session_from_cookie():
+        st.rerun()
+
+    # ---------------------------------------------------------
+    # No valid cookie → login
+    # ---------------------------------------------------------
+    render_auth_page()
 
 
 if __name__ == "__main__":

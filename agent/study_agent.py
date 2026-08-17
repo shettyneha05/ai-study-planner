@@ -121,7 +121,19 @@ def chat_with_agent(
     ai_messages = result.get("messages", [])
     if ai_messages:
         final_message = ai_messages[-1]
-        response_text = final_message.content
+        content = final_message.content
+        if isinstance(content, list):
+            text_parts=[]
+
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            response_text = "".join(text_parts).strip()
+
+        elif isinstance(content, str):
+            response_text = content.strip()        
+        else:
+            response_text=str(content)
     else:
         response_text = "I couldn't generate a response. Please try again."
 
